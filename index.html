@@ -1,0 +1,1995 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Meu Caixa</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+<script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+<script src="https://unpkg.com/lucide@0.462.0/dist/umd/lucide.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-type="module">
+const { useState, useMemo } = React;
+const { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, LineChart, Line, XAxis, YAxis, CartesianGrid, BarChart, Bar, Legend } = Recharts;
+const _icons = (window.lucide && (lucide.icons || lucide)) || {};
+function makeIcon(name) {
+  return function Icon({ size = 24, color = "currentColor", strokeWidth = 2, ...rest }) {
+    const node = _icons[name];
+    if (!node) return null;
+    const children = (node[2] || node.slice(2)[0] && node[2] ? node[2] : []);
+    return React.createElement("svg", {
+      width: size, height: size, viewBox: "0 0 24 24", fill: "none",
+      stroke: color, strokeWidth, strokeLinecap: "round", strokeLinejoin: "round", ...rest
+    }, (node[2] || []).map((c, i) => React.createElement(c[0], { key: i, ...c[1] })));
+  };
+}
+const LayoutDashboard = makeIcon("LayoutDashboard");
+const ArrowDownCircle = makeIcon("ArrowDownCircle");
+const ArrowUpCircle = makeIcon("ArrowUpCircle");
+const History = makeIcon("History");
+const Target = makeIcon("Target");
+const CreditCard = makeIcon("CreditCard");
+const PieIcon = makeIcon("PieChart");
+const User = makeIcon("User");
+const Plus = makeIcon("Plus");
+const Moon = makeIcon("Moon");
+const Sun = makeIcon("Sun");
+const Lightbulb = makeIcon("Lightbulb");
+const ChevronRight = makeIcon("ChevronRight");
+const ChevronLeft = makeIcon("ChevronLeft");
+const Search = makeIcon("Search");
+const Trash2 = makeIcon("Trash2");
+const Pencil = makeIcon("Pencil");
+const Wallet = makeIcon("Wallet");
+const TrendingUp = makeIcon("TrendingUp");
+const TrendingDown = makeIcon("TrendingDown");
+const AlertTriangle = makeIcon("AlertTriangle");
+const CheckCircle2 = makeIcon("CheckCircle2");
+const X = makeIcon("X");
+const Shield = makeIcon("Shield");
+const ShoppingBag = makeIcon("ShoppingBag");
+const Calendar = makeIcon("Calendar");
+const Calculator = makeIcon("Calculator");
+const Gauge = makeIcon("Gauge");
+const Trophy = makeIcon("Trophy");
+const Lock = makeIcon("Lock");
+const Flame = makeIcon("Flame");
+const Grid3x3 = makeIcon("Grid3x3");
+const Award = makeIcon("Award");
+
+
+
+
+/* ---------------------------------------------------------
+   TOKENS
+--------------------------------------------------------- */
+const T = {
+  green: "#22C55E",
+  greenDark: "#16A34A",
+  greenSoft: "#DCFCE7",
+  blue: "#2563EB",
+  blueSoft: "#DBEAFE",
+  amber: "#F59E0B",
+  amberSoft: "#FEF3C7",
+  red: "#EF4444",
+  redSoft: "#FEE2E2",
+};
+
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+/* ---------------------------------------------------------
+   CONFIGURAÇÃO SUPABASE
+   Substitui os dois valores abaixo pelos do teu projeto em
+   Supabase → Project Settings → API. Instruções completas
+   no ficheiro SETUP.md que acompanha este ficheiro.
+--------------------------------------------------------- */
+const SUPABASE_URL = "https://gctiufxhltlbjtxfcxgk.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdjdGl1ZnhobHRsYmp0eGZjeGdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxMzczNzgsImV4cCI6MjEwMTcxMzM3OH0.Mg56K51kgbzu59vm-ernv9vX6QaVKaviqgrSxXiX3SI";
+
+const isSupabaseConfigured =
+  SUPABASE_URL.startsWith("https://") &&
+  !SUPABASE_ANON_KEY.startsWith("COLOCA_AQUI");
+
+const supabase = isSupabaseConfigured
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+/* ---------------------------------------------------------
+   CACHE LOCAL (usada como offline cache / fallback)
+   Separada por conta (userId) para nunca misturar dados
+   de contas diferentes no mesmo navegador.
+--------------------------------------------------------- */
+const STORAGE_PREFIX = "meucaixa_dados_v2";
+
+function loadSavedState(userId) {
+  try {
+    const raw = localStorage.getItem(`${STORAGE_PREFIX}:${userId}`);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error("Não foi possível ler os dados guardados:", e);
+    return null;
+  }
+}
+
+function saveState(userId, data) {
+  try {
+    localStorage.setItem(`${STORAGE_PREFIX}:${userId}`, JSON.stringify(data));
+  } catch (e) {
+    console.error("Não foi possível guardar os dados:", e);
+  }
+}
+
+function clearSavedState(userId) {
+  try {
+    localStorage.removeItem(`${STORAGE_PREFIX}:${userId}`);
+  } catch (e) {
+    console.error("Não foi possível limpar os dados locais:", e);
+  }
+}
+
+const fmtKz = (v) =>
+  new Intl.NumberFormat("pt-AO", { maximumFractionDigits: 0 }).format(Math.round(v)) + " Kz";
+
+const CAT_ICON = {
+  Alimentação: "🍽️", Transporte: "🚌", Casa: "🏠", Internet: "🌐",
+  Saúde: "🩺", Educação: "🎓", Compras: "🛍️", Lazer: "🎬",
+  Viagem: "✈️", Outros: "•", Salário: "💼", Negócio: "🏢",
+  Freelance: "💻", Investimentos: "📈", Presentes: "🎁",
+};
+
+const CAT_COLORS = ["#22C55E", "#2563EB", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316", "#64748B"];
+
+const TIPS = [
+  "Pare de criar novas dívidas enquanto paga as atuais.",
+  "Liste todas as dívidas do menor para o maior valor.",
+  "Pague sempre pelo menos o valor mínimo para evitar juros maiores.",
+  "Priorize quitar primeiro as dívidas com juros mais altos.",
+  "Negocie descontos com os credores.",
+  "Corte gastos desnecessários temporariamente.",
+  "Tenha um orçamento mensal.",
+  "Guarde uma pequena reserva para emergências.",
+  "Evite empréstimos para pagar outras dívidas.",
+  "Comemore cada dívida quitada para manter a motivação.",
+];
+
+/* ---------------------------------------------------------
+   DADOS INICIAIS (vazios - primeira utilização)
+--------------------------------------------------------- */
+const initialIncomes = [];
+
+const initialExpenses = [];
+
+const initialGoals = [];
+
+const initialDebts = [];
+
+const monthlyEvolution = [
+  { mes: "Mar", receitas: 0, despesas: 0 },
+  { mes: "Abr", receitas: 0, despesas: 0 },
+  { mes: "Mai", receitas: 0, despesas: 0 },
+  { mes: "Jun", receitas: 0, despesas: 0 },
+  { mes: "Jul", receitas: 0, despesas: 0 },
+  { mes: "Ago", receitas: 0, despesas: 0 },
+];
+
+const initialEmergencyFund = { valorAlvo: 0, valorGuardado: 0 };
+
+const initialPurchases = [];
+
+const recurringBills = [];
+
+const initialAchievements = [
+  { id: "a1", nome: "Primeiros passos", desc: "Regista a tua primeira receita e despesa", check: (s) => s.incomes.length > 0 && s.expenses.length > 0 },
+  { id: "a2", nome: "Meta concluída", desc: "Alcança 100% de uma meta financeira", check: (s) => s.goals.some((g) => g.valorGuardado >= g.valorDesejado) },
+  { id: "a3", nome: "Sem atrasos", desc: "Nenhuma dívida atrasada no momento", check: (s) => s.debts.length > 0 && !s.debts.some((d) => d.status === "Atrasada") },
+  { id: "a4", nome: "Poupador nato", desc: "Já guardaste mais de 300.000 Kz em metas", check: (s) => s.goals.reduce((sum, g) => sum + g.valorGuardado, 0) >= 300000 },
+  { id: "a5", nome: "Reserva a caminho", desc: "Atingiste 30% da tua reserva de emergência", check: (s) => s.emergencyFund.valorAlvo > 0 && s.emergencyFund.valorGuardado / s.emergencyFund.valorAlvo >= 0.3 },
+  { id: "a6", nome: "Caçador de dívidas", desc: "Já quitaste pelo menos uma dívida", check: (s) => s.debts.some((d) => d.status === "Quitada") },
+];
+
+const initialChallenges = [
+  { id: "c1", nome: "7 dias sem gastar em lazer", desc: "Evita despesas de lazer durante uma semana", progresso: 0, meta: 7, unidade: "dias" },
+  { id: "c2", nome: "Poupar 5% da renda este mês", desc: "Guarda 5% do que recebes numa meta", progresso: 0, meta: 100, unidade: "%" },
+  { id: "c3", nome: "Regista tudo por 14 dias", desc: "Lança todas as receitas e despesas durante 2 semanas", progresso: 0, meta: 14, unidade: "dias" },
+];
+
+
+const NAV_MAIN = [
+  { key: "dashboard", label: "Início", icon: LayoutDashboard },
+  { key: "receitas", label: "Receitas", icon: ArrowUpCircle },
+  { key: "despesas", label: "Despesas", icon: ArrowDownCircle },
+  { key: "historico", label: "Histórico", icon: History },
+];
+const NAV_PLANEJAMENTO = [
+  { key: "metas", label: "Metas", icon: Target },
+  { key: "reserva", label: "Reserva de emergência", icon: Shield },
+  { key: "compras", label: "Planejador de compras", icon: ShoppingBag },
+  { key: "dividas", label: "Dívidas", icon: CreditCard },
+  { key: "calendario", label: "Calendário financeiro", icon: Calendar },
+  { key: "simulador", label: "Simulador de empréstimo", icon: Calculator },
+];
+const NAV_INSIGHTS = [
+  { key: "relatorios", label: "Relatórios", icon: PieIcon },
+  { key: "saude", label: "Saúde financeira", icon: Gauge },
+  { key: "conquistas", label: "Conquistas e desafios", icon: Trophy },
+  { key: "dicas", label: "Sair das dívidas", icon: Lightbulb },
+];
+const NAV_OUTROS = [
+  { key: "perfil", label: "Perfil", icon: User },
+];
+const NAV = [...NAV_MAIN, ...NAV_PLANEJAMENTO, ...NAV_INSIGHTS, ...NAV_OUTROS];
+const NAV_SECTIONS = [
+  { title: "Geral", items: NAV_MAIN },
+  { title: "Planeamento", items: NAV_PLANEJAMENTO },
+  { title: "Análise", items: NAV_INSIGHTS },
+  { title: "Conta", items: NAV_OUTROS },
+];
+const MOBILE_TABS = [NAV_MAIN[0], NAV_MAIN[2], NAV_PLANEJAMENTO[0], NAV_PLANEJAMENTO[3]];
+
+/* ---------------------------------------------------------
+   SMALL UI PRIMITIVES
+--------------------------------------------------------- */
+function Card({ children, style, className = "" }) {
+  return (
+    <div
+      className={`rounded-2xl p-5 ${className}`}
+      style={{ background: "var(--card)", border: "1px solid var(--border)", ...style }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Badge({ children, color }) {
+  return (
+    <span
+      className="text-xs font-medium px-2 py-1 rounded-full"
+      style={{ background: color + "22", color }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function ProgressBar({ pct, color = T.green }) {
+  return (
+    <div className="w-full h-2.5 rounded-full overflow-hidden" style={{ background: "var(--track)" }}>
+      <div
+        className="h-full rounded-full transition-all duration-500"
+        style={{ width: `${Math.min(100, pct)}%`, background: color }}
+      />
+    </div>
+  );
+}
+
+function IconBtn({ icon: Icon, onClick, label }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      className="p-2 rounded-lg transition-colors"
+      style={{ color: "var(--muted)" }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover)")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+    >
+      <Icon size={17} />
+    </button>
+  );
+}
+
+function StatusBadge({ status }) {
+  const map = {
+    "Em andamento": { c: T.blue },
+    "Quitada": { c: T.green },
+    "A vencer": { c: T.amber },
+    "Atrasada": { c: T.red },
+  };
+  return <Badge color={map[status]?.c || T.blue}>{status}</Badge>;
+}
+
+/* ---------------------------------------------------------
+   FORM MODAL (add income / expense / goal / debt)
+--------------------------------------------------------- */
+function Modal({ title, onClose, children }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6"
+      style={{ background: "rgba(15,23,42,0.55)" }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
+        style={{ background: "var(--card)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold" style={{ color: "var(--text)" }}>{title}</h3>
+          <button onClick={onClose} style={{ color: "var(--muted)" }}><X size={20} /></button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function FieldLabel({ children }) {
+  return <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>{children}</label>;
+}
+
+const inputStyle = {
+  width: "100%",
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid var(--border)",
+  background: "var(--input)",
+  color: "var(--text)",
+  fontSize: 14,
+  outline: "none",
+};
+
+/* ---------------------------------------------------------
+   DADOS NA NUVEM (Supabase)
+--------------------------------------------------------- */
+async function loadCloudData(userId) {
+  const { data, error } = await supabase
+    .from("user_data")
+    .select("data")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) {
+    console.error("Erro ao carregar dados da nuvem:", error);
+    return null;
+  }
+  return data ? data.data : null;
+}
+
+async function saveCloudData(userId, payload) {
+  const { error } = await supabase
+    .from("user_data")
+    .upsert({ user_id: userId, data: payload, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+  if (error) console.error("Erro ao guardar dados na nuvem:", error);
+}
+
+/* ---------------------------------------------------------
+   ECRÃ: CONFIGURAÇÃO NECESSÁRIA
+--------------------------------------------------------- */
+function SetupNeeded() {
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center p-6" style={{ background: "#F8FAFC" }}>
+      <div className="max-w-md w-full bg-white rounded-2xl p-6 shadow-sm border" style={{ borderColor: "#E2E8F0" }}>
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4" style={{ background: T.amberSoft }}>
+          <AlertTriangle color={T.amber} />
+        </div>
+        <h1 className="text-lg font-bold mb-2" style={{ color: "#0F172A" }}>Falta configurar a conta na nuvem</h1>
+        <p className="text-sm mb-3" style={{ color: "#475569" }}>
+          Para teres login real e sincronização entre dispositivos, preenche o SUPABASE_URL e o
+          SUPABASE_ANON_KEY no início do ficheiro index.html. Segue o guia SETUP.md incluído.
+        </p>
+        <p className="text-xs" style={{ color: "#94A3B8" }}>
+          Até isso ficar pronto, o app não consegue guardar nem sincronizar dados.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   ECRÃ: LOGIN / REGISTO
+--------------------------------------------------------- */
+function AuthScreen() {
+  const [modo, setModo] = useState("login"); // 'login' | 'registo'
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState("");
+  const [aviso, setAviso] = useState("");
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setErro("");
+    setAviso("");
+    setLoading(true);
+    try {
+      if (modo === "registo") {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        setAviso("Conta criada! Verifica o teu email para confirmar o registo antes de entrares.");
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      }
+    } catch (err) {
+      setErro(err.message || "Ocorreu um erro. Tenta novamente.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center p-6" style={{ background: "#F8FAFC" }}>
+      <div className="max-w-sm w-full">
+        <div className="flex items-center gap-2 mb-8 justify-center">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: T.green }}>
+            <Wallet size={20} color="#fff" />
+          </div>
+          <p className="font-bold text-xl" style={{ color: "#0F172A" }}>Meu Caixa</p>
+        </div>
+        <div className="bg-white rounded-2xl p-6 shadow-sm border" style={{ borderColor: "#E2E8F0" }}>
+          <div className="flex rounded-xl p-1 mb-5" style={{ background: "#F1F5F9" }}>
+            <button
+              onClick={() => { setModo("login"); setErro(""); setAviso(""); }}
+              className="flex-1 py-2 rounded-lg text-sm font-semibold"
+              style={modo === "login" ? { background: "#fff", color: T.greenDark, boxShadow: "0 1px 2px rgba(0,0,0,.06)" } : { color: "#64748B" }}
+            >
+              Entrar
+            </button>
+            <button
+              onClick={() => { setModo("registo"); setErro(""); setAviso(""); }}
+              className="flex-1 py-2 rounded-lg text-sm font-semibold"
+              style={modo === "registo" ? { background: "#fff", color: T.greenDark, boxShadow: "0 1px 2px rgba(0,0,0,.06)" } : { color: "#64748B" }}
+            >
+              Criar conta
+            </button>
+          </div>
+          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+            <div>
+              <FieldLabel>Email</FieldLabel>
+              <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="oseuemail@exemplo.com" style={inputStyle} />
+            </div>
+            <div>
+              <FieldLabel>Palavra-passe</FieldLabel>
+              <input type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres" style={inputStyle} />
+            </div>
+            {erro && <p className="text-xs font-medium" style={{ color: T.red }}>{erro}</p>}
+            {aviso && <p className="text-xs font-medium" style={{ color: T.greenDark }}>{aviso}</p>}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-3 rounded-xl text-sm font-semibold text-white mt-2 disabled:opacity-50"
+              style={{ background: T.green }}
+            >
+              {loading ? "A processar..." : modo === "login" ? "Entrar" : "Criar conta"}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   PORTA DE ENTRADA: gere sessão e decide o que mostrar
+--------------------------------------------------------- */
+function App() {
+  const [loadingSession, setLoadingSession] = useState(true);
+  const [session, setSession] = useState(null);
+
+  React.useEffect(() => {
+    if (!isSupabaseConfigured) { setLoadingSession(false); return; }
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setLoadingSession(false);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  if (!isSupabaseConfigured) return <SetupNeeded />;
+  if (loadingSession) return null;
+  if (!session) return <AuthScreen />;
+  return <MeuCaixa key={session.user.id} session={session} />;
+}
+
+/* ---------------------------------------------------------
+   MAIN APP
+--------------------------------------------------------- */
+function MeuCaixa({ session }) {
+  const userId = session.user.id;
+  const localCache = useMemo(() => loadSavedState(userId), [userId]);
+
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [dark, setDark] = useState(localCache?.dark ?? false);
+  const [screen, setScreen] = useState("dashboard");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  const [incomes, setIncomes] = useState(localCache?.incomes ?? initialIncomes);
+  const [expenses, setExpenses] = useState(localCache?.expenses ?? initialExpenses);
+  const [goals, setGoals] = useState(localCache?.goals ?? initialGoals);
+  const [debts, setDebts] = useState(localCache?.debts ?? initialDebts);
+  const [emergencyFund, setEmergencyFund] = useState(localCache?.emergencyFund ?? initialEmergencyFund);
+  const [purchases, setPurchases] = useState(localCache?.purchases ?? initialPurchases);
+  const [challenges, setChallenges] = useState(localCache?.challenges ?? initialChallenges);
+  const [profile, setProfile] = useState(localCache?.profile ?? { nome: "", registado: false });
+
+  // Assim que sabemos quem é o utilizador, vai buscar os dados dele à nuvem
+  React.useEffect(() => {
+    let cancelled = false;
+    loadCloudData(userId).then((cloud) => {
+      if (cancelled) return;
+      if (cloud) {
+        setDark(cloud.dark ?? false);
+        setIncomes(cloud.incomes ?? initialIncomes);
+        setExpenses(cloud.expenses ?? initialExpenses);
+        setGoals(cloud.goals ?? initialGoals);
+        setDebts(cloud.debts ?? initialDebts);
+        setEmergencyFund(cloud.emergencyFund ?? initialEmergencyFund);
+        setPurchases(cloud.purchases ?? initialPurchases);
+        setChallenges(cloud.challenges ?? initialChallenges);
+        setProfile(cloud.profile ?? { nome: "", registado: false });
+      }
+      setDataLoaded(true);
+    });
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  // Guarda automaticamente (cache local + nuvem) sempre que algo muda
+  React.useEffect(() => {
+    if (!dataLoaded) return; // evita sobrescrever a nuvem antes dos dados chegarem
+    const payload = { dark, incomes, expenses, goals, debts, emergencyFund, purchases, challenges, profile };
+    saveState(userId, payload);
+    const timeout = setTimeout(() => saveCloudData(userId, payload), 600);
+    return () => clearTimeout(timeout);
+  }, [dataLoaded, userId, dark, incomes, expenses, goals, debts, emergencyFund, purchases, challenges, profile]);
+
+  const [modal, setModal] = useState(null);
+  // 'income' | 'expense' | 'goal' | 'debt' | 'purchase'
+  // {type:'addMoney', goalId} | {type:'pay', debtId} | {type:'addEmergency'} | {type:'addPurchase', purchaseId}
+
+  const dailyTip = TIPS[new Date().getDate() % TIPS.length];
+
+  const totalIncome = useMemo(() => incomes.reduce((s, i) => s + i.valor, 0), [incomes]);
+  const totalExpense = useMemo(() => expenses.reduce((s, e) => s + e.valor, 0), [expenses]);
+  const saldo = totalIncome - totalExpense;
+  const poupado = goals.reduce((s, g) => s + g.valorGuardado, 0);
+  const totalDebtRemaining = debts.reduce((s, d) => s + (d.valorTotal - d.valorPago), 0);
+
+  const expensesByCategory = useMemo(() => {
+    const map = {};
+    expenses.forEach((e) => { map[e.categoria] = (map[e.categoria] || 0) + e.valor; });
+    return Object.entries(map).map(([name, value], idx) => ({ name, value, color: CAT_COLORS[idx % CAT_COLORS.length] }));
+  }, [expenses]);
+
+  const allMovements = useMemo(() => {
+    const inc = incomes.map((i) => ({ ...i, tipo: "receita" }));
+    const exp = expenses.map((e) => ({ ...e, tipo: "despesa" }));
+    return [...inc, ...exp].sort((a, b) => new Date(b.data) - new Date(a.data));
+  }, [incomes, expenses]);
+
+  const healthScore = useMemo(() => {
+    const savingsRate = totalIncome > 0 ? (totalIncome - totalExpense) / totalIncome : 0;
+    const savingsScore = clamp01(savingsRate / 0.2) * 30; // 20% de poupança = pontuação máxima
+    const debtRatio = totalIncome > 0 ? totalDebtRemaining / totalIncome : 1;
+    const debtScore = clamp01(1 - debtRatio) * 25;
+    const coverage = emergencyFund.valorAlvo > 0 ? emergencyFund.valorGuardado / emergencyFund.valorAlvo : 0;
+    const emergencyScore = clamp01(coverage) * 25;
+    const avgGoalProgress = goals.length
+      ? goals.reduce((s, g) => s + Math.min(1, g.valorGuardado / g.valorDesejado), 0) / goals.length
+      : 0;
+    const goalScore = clamp01(avgGoalProgress) * 20;
+    const total = Math.round(savingsScore + debtScore + emergencyScore + goalScore);
+    return { total, savingsRate, debtRatio, coverage, avgGoalProgress };
+  }, [totalIncome, totalExpense, totalDebtRemaining, emergencyFund, goals]);
+
+  /* ---------- theme vars ---------- */
+  const vars = dark
+    ? {
+        "--bg": "#0B1120", "--card": "#111827", "--text": "#F1F5F9", "--muted": "#94A3B8",
+        "--border": "#1F2937", "--hover": "#1E293B", "--track": "#1E293B", "--input": "#1E293B",
+        "--sidebar": "#0B1120",
+      }
+    : {
+        "--bg": "#F8FAFC", "--card": "#FFFFFF", "--text": "#0F172A", "--muted": "#64748B",
+        "--border": "#E2E8F0", "--hover": "#F1F5F9", "--track": "#EEF2F7", "--input": "#F8FAFC",
+        "--sidebar": "#FFFFFF",
+      };
+
+  /* ---------- handlers ---------- */
+  function addIncome(data) { setIncomes((p) => [{ id: "i" + Date.now(), ...data }, ...p]); setModal(null); }
+  function addExpense(data) { setExpenses((p) => [{ id: "e" + Date.now(), ...data }, ...p]); setModal(null); }
+  function addGoal(data) { setGoals((p) => [...p, { id: "g" + Date.now(), valorGuardado: 0, ...data }]); setModal(null); }
+  function addDebt(data) { setDebts((p) => [...p, { id: "d" + Date.now(), valorPago: 0, status: "Em andamento", ...data }]); setModal(null); }
+  function addMoneyToGoal(goalId, amount) {
+    setGoals((p) => p.map((g) => g.id === goalId ? { ...g, valorGuardado: Math.min(g.valorDesejado, g.valorGuardado + amount) } : g));
+    setModal(null);
+  }
+  function payDebt(debtId, amount) {
+    setDebts((p) => p.map((d) => {
+      if (d.id !== debtId) return d;
+      const novoPago = Math.min(d.valorTotal, d.valorPago + amount);
+      return { ...d, valorPago: novoPago, status: novoPago >= d.valorTotal ? "Quitada" : d.status };
+    }));
+    setModal(null);
+  }
+  function deleteMovement(id, tipo) {
+    if (tipo === "receita") setIncomes((p) => p.filter((i) => i.id !== id));
+    else setExpenses((p) => p.filter((e) => e.id !== id));
+  }
+  function addToEmergencyFund(amount) {
+    setEmergencyFund((p) => ({ ...p, valorGuardado: p.valorAlvo > 0 ? Math.min(p.valorAlvo, p.valorGuardado + amount) : p.valorGuardado + amount }));
+    setModal(null);
+  }
+  function addPurchase(data) { setPurchases((p) => [...p, { id: "p" + Date.now(), valorReservado: 0, comprado: false, ...data }]); setModal(null); }
+  function addToPurchase(purchaseId, amount) {
+    setPurchases((p) => p.map((it) => it.id === purchaseId ? { ...it, valorReservado: Math.min(it.valorEstimado, it.valorReservado + amount) } : it));
+    setModal(null);
+  }
+  function togglePurchaseBought(purchaseId) {
+    setPurchases((p) => p.map((it) => it.id === purchaseId ? { ...it, comprado: !it.comprado } : it));
+  }
+  function bumpChallenge(id) {
+    setChallenges((p) => p.map((c) => c.id === id ? { ...c, progresso: Math.min(c.meta, c.progresso + 1) } : c));
+  }
+
+  return (
+    <div style={{ ...vars, background: "var(--bg)", minHeight: 600 }} className="w-full flex font-sans" >
+      <style>{`
+        * { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        ::placeholder { color: var(--muted); opacity: .7; }
+      `}</style>
+
+      {/* ---------- SIDEBAR (desktop) ---------- */}
+      <aside
+        className="hidden md:flex flex-col w-64 shrink-0 p-4 border-r overflow-y-auto"
+        style={{ background: "var(--sidebar)", borderColor: "var(--border)" }}
+      >
+        <div className="flex items-center gap-2 px-2 mb-6 mt-2">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: T.green }}>
+            <Wallet size={18} color="#fff" />
+          </div>
+          <div>
+            <p className="font-bold leading-tight" style={{ color: "var(--text)" }}>Meu Caixa</p>
+            <p className="text-[11px]" style={{ color: "var(--muted)" }}>Angola · AOA</p>
+          </div>
+        </div>
+        <nav className="flex flex-col gap-4">
+          {NAV_SECTIONS.map((section) => (
+            <div key={section.title}>
+              <p className="text-[11px] font-semibold uppercase tracking-wide px-3 mb-1.5" style={{ color: "var(--muted)" }}>
+                {section.title}
+              </p>
+              <div className="flex flex-col gap-1">
+                {section.items.map((n) => {
+                  const active = screen === n.key;
+                  return (
+                    <button
+                      key={n.key}
+                      onClick={() => setScreen(n.key)}
+                      className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors text-left"
+                      style={{
+                        background: active ? T.greenSoft : "transparent",
+                        color: active ? T.greenDark : "var(--muted)",
+                      }}
+                    >
+                      <n.icon size={18} />
+                      {n.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </nav>
+        <div className="mt-auto pt-4">
+          <button
+            onClick={() => setDark((d) => !d)}
+            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium"
+            style={{ color: "var(--muted)", border: "1px solid var(--border)" }}
+          >
+            {dark ? <Sun size={16} /> : <Moon size={16} />}
+            {dark ? "Modo claro" : "Modo escuro"}
+          </button>
+        </div>
+      </aside>
+
+      {/* ---------- MAIN ---------- */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        {/* topbar mobile */}
+        <div className="md:hidden flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: "var(--border)" }}>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: T.green }}>
+              <Wallet size={15} color="#fff" />
+            </div>
+            <span className="font-bold" style={{ color: "var(--text)" }}>Meu Caixa</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <IconBtn icon={dark ? Sun : Moon} onClick={() => setDark((d) => !d)} label="tema" />
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8">
+          {screen === "dashboard" && (
+            <Dashboard
+              saldo={saldo} totalIncome={totalIncome} totalExpense={totalExpense}
+              poupado={poupado} goals={goals} debts={debts}
+              expensesByCategory={expensesByCategory} allMovements={allMovements}
+              dailyTip={dailyTip} setModal={setModal} setScreen={setScreen}
+              healthScore={healthScore} emergencyFund={emergencyFund}
+            />
+          )}
+          {screen === "receitas" && (
+            <MovementScreen
+              tipo="receita" items={incomes} setModal={setModal} onDelete={deleteMovement}
+            />
+          )}
+          {screen === "despesas" && (
+            <MovementScreen
+              tipo="despesa" items={expenses} setModal={setModal} onDelete={deleteMovement}
+            />
+          )}
+          {screen === "historico" && (
+            <Historico allMovements={allMovements} onDelete={deleteMovement} />
+          )}
+          {screen === "metas" && (
+            <Metas goals={goals} setModal={setModal} />
+          )}
+          {screen === "reserva" && (
+            <ReservaEmergencia emergencyFund={emergencyFund} totalExpense={totalExpense} setModal={setModal} />
+          )}
+          {screen === "compras" && (
+            <PlanejadorCompras purchases={purchases} setModal={setModal} onToggleBought={togglePurchaseBought} />
+          )}
+          {screen === "dividas" && (
+            <Dividas debts={debts} setModal={setModal} totalDebtRemaining={totalDebtRemaining} />
+          )}
+          {screen === "calendario" && (
+            <CalendarioFinanceiro debts={debts} purchases={purchases} bills={recurringBills} />
+          )}
+          {screen === "simulador" && <SimuladorEmprestimo />}
+          {screen === "relatorios" && (
+            <Relatorios expensesByCategory={expensesByCategory} monthlyEvolution={monthlyEvolution} totalIncome={totalIncome} totalExpense={totalExpense} />
+          )}
+          {screen === "saude" && (
+            <SaudeFinanceira healthScore={healthScore} totalIncome={totalIncome} totalExpense={totalExpense} totalDebtRemaining={totalDebtRemaining} emergencyFund={emergencyFund} />
+          )}
+          {screen === "conquistas" && (
+            <Conquistas
+              achievements={initialAchievements}
+              state={{ incomes, expenses, goals, debts, emergencyFund }}
+              challenges={challenges}
+              onBump={bumpChallenge}
+            />
+          )}
+          {screen === "dicas" && <Dicas />}
+          {screen === "perfil" && <Perfil dark={dark} setDark={setDark} profile={profile} setProfile={setProfile} session={session} />}
+          {screen === "mais" && <MaisMenu setScreen={setScreen} />}
+        </div>
+
+        {/* bottom nav mobile */}
+        <div
+          className="md:hidden fixed bottom-0 left-0 right-0 flex items-center justify-around py-2 border-t"
+          style={{ background: "var(--sidebar)", borderColor: "var(--border)" }}
+        >
+          {MOBILE_TABS.map((n) => {
+            const active = screen === n.key;
+            return (
+              <button key={n.key} onClick={() => setScreen(n.key)} className="flex flex-col items-center gap-0.5 px-2 py-1">
+                <n.icon size={19} color={active ? T.green : "var(--muted)"} />
+                <span className="text-[10px]" style={{ color: active ? T.green : "var(--muted)" }}>{n.label}</span>
+              </button>
+            );
+          })}
+          <button onClick={() => setScreen("mais")} className="flex flex-col items-center gap-0.5 px-2 py-1">
+            <Grid3x3 size={19} color={screen === "mais" ? T.green : "var(--muted)"} />
+            <span className="text-[10px]" style={{ color: screen === "mais" ? T.green : "var(--muted)" }}>Mais</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ---------- MODALS ---------- */}
+      {modal === "income" && (
+        <MovementForm title="Nova receita" categories={["Salário","Negócio","Freelance","Investimentos","Presentes","Outros"]} onSubmit={addIncome} onClose={() => setModal(null)} />
+      )}
+      {modal === "expense" && (
+        <MovementForm title="Nova despesa" categories={["Alimentação","Transporte","Casa","Internet","Saúde","Educação","Compras","Lazer","Viagem","Outros"]} onSubmit={addExpense} onClose={() => setModal(null)} />
+      )}
+      {modal === "goal" && <GoalForm onSubmit={addGoal} onClose={() => setModal(null)} />}
+      {modal === "debt" && <DebtForm onSubmit={addDebt} onClose={() => setModal(null)} />}
+      {modal === "purchase" && <PurchaseForm onSubmit={addPurchase} onClose={() => setModal(null)} />}
+      {modal && modal.type === "addMoney" && (
+        <AmountForm title="Adicionar dinheiro à meta" cta="Adicionar" onSubmit={(v) => addMoneyToGoal(modal.goalId, v)} onClose={() => setModal(null)} />
+      )}
+      {modal && modal.type === "pay" && (
+        <AmountForm title="Registar pagamento" cta="Registar" onSubmit={(v) => payDebt(modal.debtId, v)} onClose={() => setModal(null)} />
+      )}
+      {modal && modal.type === "addEmergency" && (
+        <AmountForm title="Reforçar reserva de emergência" cta="Adicionar" onSubmit={addToEmergencyFund} onClose={() => setModal(null)} />
+      )}
+      {modal && modal.type === "addPurchase" && (
+        <AmountForm title="Reservar dinheiro para a compra" cta="Reservar" onSubmit={(v) => addToPurchase(modal.purchaseId, v)} onClose={() => setModal(null)} />
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   DASHBOARD
+--------------------------------------------------------- */
+function Dashboard({ saldo, totalIncome, totalExpense, poupado, goals, debts, expensesByCategory, allMovements, dailyTip, setModal, setScreen, healthScore, emergencyFund }) {
+  return (
+    <div className="max-w-6xl mx-auto">
+      <div className="flex items-center justify-between mb-1">
+        <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>Olá 👋</h1>
+      </div>
+      <p className="text-sm mb-6" style={{ color: "var(--muted)" }}>Aqui está o resumo das tuas finanças este mês.</p>
+
+      {/* quick actions */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        {[
+          { label: "Adicionar Receita", icon: ArrowUpCircle, action: () => setModal("income"), color: T.green },
+          { label: "Adicionar Despesa", icon: ArrowDownCircle, action: () => setModal("expense"), color: T.red },
+          { label: "Nova Meta", icon: Target, action: () => setModal("goal"), color: T.blue },
+          { label: "Nova Dívida", icon: CreditCard, action: () => setModal("debt"), color: T.amber },
+        ].map((a) => (
+          <button
+            key={a.label}
+            onClick={a.action}
+            className="flex flex-col items-start gap-3 p-4 rounded-2xl text-left transition-transform active:scale-[0.98]"
+            style={{ background: "var(--card)", border: "1px solid var(--border)" }}
+          >
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: a.color + "1E" }}>
+              <a.icon size={18} color={a.color} />
+            </div>
+            <span className="text-sm font-medium" style={{ color: "var(--text)" }}>{a.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* summary cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <Card>
+          <p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Saldo atual</p>
+          <p className="text-xl font-bold" style={{ color: saldo >= 0 ? T.green : T.red }}>{fmtKz(saldo)}</p>
+        </Card>
+        <Card>
+          <p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Recebido no mês</p>
+          <p className="text-xl font-bold" style={{ color: "var(--text)" }}>{fmtKz(totalIncome)}</p>
+        </Card>
+        <Card>
+          <p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Gasto no mês</p>
+          <p className="text-xl font-bold" style={{ color: "var(--text)" }}>{fmtKz(totalExpense)}</p>
+        </Card>
+        <Card>
+          <p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Valor poupado</p>
+          <p className="text-xl font-bold" style={{ color: T.blue }}>{fmtKz(poupado)}</p>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+        <button onClick={() => setScreen("saude")} className="text-left">
+          <Card className="flex items-center justify-between" style={{ display: "flex" }}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: T.blueSoft }}>
+                <Gauge size={18} color={T.blue} />
+              </div>
+              <div>
+                <p className="text-xs" style={{ color: "var(--muted)" }}>Saúde financeira</p>
+                <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>{healthScore.total}/100</p>
+              </div>
+            </div>
+            <ChevronRight size={16} color="var(--muted)" />
+          </Card>
+        </button>
+        <button onClick={() => setScreen("reserva")} className="text-left">
+          <Card className="flex items-center justify-between" style={{ display: "flex" }}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: T.greenSoft }}>
+                <Shield size={18} color={T.greenDark} />
+              </div>
+              <div>
+                <p className="text-xs" style={{ color: "var(--muted)" }}>Reserva de emergência</p>
+                <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>{emergencyFund.valorAlvo > 0 ? Math.round((emergencyFund.valorGuardado / emergencyFund.valorAlvo) * 100) : 0}% concluída</p>
+              </div>
+            </div>
+            <ChevronRight size={16} color="var(--muted)" />
+          </Card>
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        {/* chart */}
+        <Card className="lg:col-span-2">
+          <div className="flex items-center justify-between mb-4">
+            <p className="font-semibold text-sm" style={{ color: "var(--text)" }}>Despesas por categoria</p>
+          </div>
+          <div style={{ height: 220 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={expensesByCategory} dataKey="value" nameKey="name" innerRadius={55} outerRadius={80} paddingAngle={2}>
+                  {expensesByCategory.map((c, i) => <Cell key={i} fill={c.color} />)}
+                </Pie>
+                <Tooltip formatter={(v) => fmtKz(v)} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {expensesByCategory.map((c) => (
+              <span key={c.name} className="flex items-center gap-1.5 text-xs" style={{ color: "var(--muted)" }}>
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: c.color }} />
+                {c.name}
+              </span>
+            ))}
+          </div>
+        </Card>
+
+        {/* stats + goals/debts count */}
+        <div className="flex flex-col gap-4">
+          <Card style={{ background: T.greenSoft, borderColor: T.greenSoft }}>
+            <div className="flex items-start gap-2">
+              <Lightbulb size={18} color={T.greenDark} className="shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold mb-1" style={{ color: T.greenDark }}>Dica do dia</p>
+                <p className="text-sm" style={{ color: T.greenDark }}>{dailyTip}</p>
+              </div>
+            </div>
+          </Card>
+          <div className="grid grid-cols-2 gap-3">
+            <Card>
+              <p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Metas ativas</p>
+              <p className="text-lg font-bold" style={{ color: "var(--text)" }}>{goals.length}</p>
+            </Card>
+            <Card>
+              <p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Dívidas</p>
+              <p className="text-lg font-bold" style={{ color: "var(--text)" }}>{debts.length}</p>
+            </Card>
+          </div>
+        </div>
+      </div>
+
+      {/* últimas movimentações */}
+      <Card>
+        <div className="flex items-center justify-between mb-3">
+          <p className="font-semibold text-sm" style={{ color: "var(--text)" }}>Últimas movimentações</p>
+          <button onClick={() => setScreen("historico")} className="text-xs font-medium flex items-center gap-0.5" style={{ color: T.blue }}>
+            Ver tudo <ChevronRight size={14} />
+          </button>
+        </div>
+        <div className="flex flex-col divide-y" style={{ borderColor: "var(--border)" }}>
+          {allMovements.slice(0, 5).map((m) => (
+            <MovementRow key={m.id} m={m} />
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function MovementRow({ m, onDelete }) {
+  const isIncome = m.tipo === "receita";
+  return (
+    <div className="flex items-center justify-between py-3 group">
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="w-9 h-9 rounded-full flex items-center justify-center text-base shrink-0" style={{ background: isIncome ? T.greenSoft : T.redSoft }}>
+          {CAT_ICON[m.categoria] || "•"}
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-medium truncate" style={{ color: "var(--text)" }}>{m.descricao}</p>
+          <p className="text-xs" style={{ color: "var(--muted)" }}>{m.categoria} · {new Date(m.data).toLocaleDateString("pt-PT")}</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <span className="text-sm font-semibold" style={{ color: isIncome ? T.green : T.red }}>
+          {isIncome ? "+" : "-"}{fmtKz(m.valor)}
+        </span>
+        {onDelete && (
+          <button onClick={() => onDelete(m.id, m.tipo)} className="opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: "var(--muted)" }}>
+            <Trash2 size={14} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   RECEITAS / DESPESAS SCREEN
+--------------------------------------------------------- */
+function MovementScreen({ tipo, items, setModal, onDelete }) {
+  const isIncome = tipo === "receita";
+  const total = items.reduce((s, i) => s + i.valor, 0);
+  return (
+    <div className="max-w-3xl mx-auto">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>{isIncome ? "Receitas" : "Despesas"}</h1>
+          <p className="text-sm" style={{ color: "var(--muted)" }}>Total: <span style={{ color: isIncome ? T.green : T.red, fontWeight: 600 }}>{fmtKz(total)}</span></p>
+        </div>
+        <button
+          onClick={() => setModal(isIncome ? "income" : "expense")}
+          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-white"
+          style={{ background: isIncome ? T.green : T.red }}
+        >
+          <Plus size={16} /> Nova
+        </button>
+      </div>
+      <Card>
+        {items.length === 0 ? (
+          <p className="text-sm text-center py-8" style={{ color: "var(--muted)" }}>Nenhum registo ainda.</p>
+        ) : (
+          <div className="flex flex-col divide-y" style={{ borderColor: "var(--border)" }}>
+            {items.map((m) => <MovementRow key={m.id} m={{ ...m, tipo }} onDelete={onDelete} />)}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   HISTÓRICO
+--------------------------------------------------------- */
+function Historico({ allMovements, onDelete }) {
+  const [filter, setFilter] = useState("mes");
+  const [query, setQuery] = useState("");
+
+  const filtered = useMemo(() => {
+    const now = new Date("2026-08-07");
+    return allMovements.filter((m) => {
+      const d = new Date(m.data);
+      if (query && !m.descricao.toLowerCase().includes(query.toLowerCase()) && !m.categoria.toLowerCase().includes(query.toLowerCase())) return false;
+      if (filter === "hoje") return d.toDateString() === now.toDateString();
+      if (filter === "semana") return (now - d) / 86400000 <= 7;
+      if (filter === "mes") return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      if (filter === "ano") return d.getFullYear() === now.getFullYear();
+      return true;
+    });
+  }, [allMovements, filter, query]);
+
+  return (
+    <div className="max-w-3xl mx-auto">
+      <h1 className="text-2xl font-bold mb-4" style={{ color: "var(--text)" }}>Histórico</h1>
+      <div className="flex flex-col sm:flex-row gap-3 mb-4">
+        <div className="flex items-center gap-2 px-3 rounded-xl flex-1" style={{ border: "1px solid var(--border)", background: "var(--card)" }}>
+          <Search size={16} color="var(--muted)" />
+          <input
+            placeholder="Pesquisar por descrição ou categoria"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full py-2.5 text-sm bg-transparent outline-none"
+            style={{ color: "var(--text)" }}
+          />
+        </div>
+        <div className="flex gap-2">
+          {[["hoje","Hoje"],["semana","Semana"],["mes","Mês"],["ano","Ano"]].map(([k, l]) => (
+            <button
+              key={k}
+              onClick={() => setFilter(k)}
+              className="px-3 py-2 rounded-xl text-xs font-medium whitespace-nowrap"
+              style={{
+                background: filter === k ? T.green : "var(--card)",
+                color: filter === k ? "#fff" : "var(--muted)",
+                border: "1px solid " + (filter === k ? T.green : "var(--border)"),
+              }}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+      <Card>
+        {filtered.length === 0 ? (
+          <p className="text-sm text-center py-8" style={{ color: "var(--muted)" }}>Nenhuma movimentação encontrada.</p>
+        ) : (
+          <div className="flex flex-col divide-y" style={{ borderColor: "var(--border)" }}>
+            {filtered.map((m) => <MovementRow key={m.id} m={m} onDelete={onDelete} />)}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   METAS
+--------------------------------------------------------- */
+function monthsBetween(d1, d2) {
+  return Math.max(1, (d2.getFullYear() - d1.getFullYear()) * 12 + (d2.getMonth() - d1.getMonth()));
+}
+
+function Metas({ goals, setModal }) {
+  return (
+    <div className="max-w-4xl mx-auto">
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>Metas financeiras</h1>
+        <button onClick={() => setModal("goal")} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: T.blue }}>
+          <Plus size={16} /> Nova meta
+        </button>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-4">
+        {goals.map((g) => {
+          const pct = (g.valorGuardado / g.valorDesejado) * 100;
+          const restante = g.valorDesejado - g.valorGuardado;
+          // simple forecast: assume avg monthly saving = valorGuardado / months elapsed since 3 months ago (mock: assume 3 months of history)
+          const avgMonthly = g.valorGuardado / 3 || 1;
+          const monthsToGoal = restante > 0 ? Math.ceil(restante / avgMonthly) : 0;
+          const done = pct >= 100;
+          return (
+            <Card key={g.id}>
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <p className="font-semibold" style={{ color: "var(--text)" }}>{g.nome}</p>
+                  <p className="text-xs" style={{ color: "var(--muted)" }}>Prazo: {new Date(g.prazo).toLocaleDateString("pt-PT")}</p>
+                </div>
+                {done ? <Badge color={T.green}>Concluída</Badge> : <Badge color={T.blue}>{Math.round(pct)}%</Badge>}
+              </div>
+              <ProgressBar pct={pct} color={done ? T.green : T.blue} />
+              <div className="flex justify-between text-xs mt-2 mb-3" style={{ color: "var(--muted)" }}>
+                <span>{fmtKz(g.valorGuardado)}</span>
+                <span>{fmtKz(g.valorDesejado)}</span>
+              </div>
+              {!done && (
+                <p className="text-xs mb-3" style={{ color: "var(--muted)" }}>
+                  No ritmo atual, previsão de alcançar em <strong style={{ color: "var(--text)" }}>{monthsToGoal} {monthsToGoal === 1 ? "mês" : "meses"}</strong>.
+                </p>
+              )}
+              {!done && (
+                <button
+                  onClick={() => setModal({ type: "addMoney", goalId: g.id })}
+                  className="w-full py-2 rounded-xl text-sm font-semibold"
+                  style={{ background: T.blueSoft, color: T.blue }}
+                >
+                  Adicionar dinheiro
+                </button>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   DÍVIDAS
+--------------------------------------------------------- */
+function Dividas({ debts, setModal, totalDebtRemaining }) {
+  const totalDebt = debts.reduce((s, d) => s + d.valorTotal, 0);
+  const proximoVencimento = debts
+    .filter((d) => d.status !== "Quitada")
+    .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))[0];
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>Dívidas</h1>
+        <button onClick={() => setModal("debt")} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: T.amber }}>
+          <Plus size={16} /> Nova dívida
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <Card><p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Total das dívidas</p><p className="text-lg font-bold" style={{ color: "var(--text)" }}>{fmtKz(totalDebt)}</p></Card>
+        <Card><p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Valor restante</p><p className="text-lg font-bold" style={{ color: T.red }}>{fmtKz(totalDebtRemaining)}</p></Card>
+        <Card><p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Próximo vencimento</p><p className="text-sm font-bold" style={{ color: "var(--text)" }}>{proximoVencimento ? new Date(proximoVencimento.vencimento).toLocaleDateString("pt-PT") : "—"}</p></Card>
+        <Card><p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Quantidade</p><p className="text-lg font-bold" style={{ color: "var(--text)" }}>{debts.length}</p></Card>
+      </div>
+
+      <div className="flex flex-col gap-4">
+        {debts.map((d) => {
+          const pago = d.valorPago;
+          const restante = d.valorTotal - d.valorPago;
+          const pct = (pago / d.valorTotal) * 100;
+          const diasParaVencer = Math.ceil((new Date(d.vencimento) - new Date("2026-08-07")) / 86400000);
+          return (
+            <Card key={d.id}>
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <p className="font-semibold" style={{ color: "var(--text)" }}>{d.nome}</p>
+                  <p className="text-xs" style={{ color: "var(--muted)" }}>{d.credor} · Prioridade {d.prioridade}{d.juros ? ` · Juros ${d.juros}%` : ""}</p>
+                </div>
+                <StatusBadge status={d.status} />
+              </div>
+              <ProgressBar pct={pct} color={d.status === "Quitada" ? T.green : T.amber} />
+              <div className="flex justify-between text-xs mt-2 mb-1" style={{ color: "var(--muted)" }}>
+                <span>Pago: {fmtKz(pago)}</span>
+                <span>Total: {fmtKz(d.valorTotal)}</span>
+              </div>
+              <div className="flex items-center justify-between mt-3">
+                <div className="text-xs" style={{ color: diasParaVencer < 7 && d.status !== "Quitada" ? T.red : "var(--muted)" }}>
+                  {d.status === "Quitada"
+                    ? "Dívida quitada 🎉"
+                    : diasParaVencer >= 0
+                      ? `Vence em ${diasParaVencer} dia(s) — ${new Date(d.vencimento).toLocaleDateString("pt-PT")}`
+                      : `Atrasada há ${Math.abs(diasParaVencer)} dia(s)`}
+                </div>
+                {d.status !== "Quitada" && (
+                  <button
+                    onClick={() => setModal({ type: "pay", debtId: d.id })}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+                    style={{ background: T.amberSoft, color: "#92400E" }}
+                  >
+                    Registar pagamento
+                  </button>
+                )}
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   RESERVA DE EMERGÊNCIA
+--------------------------------------------------------- */
+function ReservaEmergencia({ emergencyFund, totalExpense, setModal }) {
+  const pct = emergencyFund.valorAlvo > 0 ? (emergencyFund.valorGuardado / emergencyFund.valorAlvo) * 100 : 0;
+  const mesesCobertura = totalExpense > 0 ? (emergencyFund.valorGuardado / totalExpense).toFixed(1) : "—";
+  const mesesRecomendados = totalExpense > 0 ? Math.round(emergencyFund.valorAlvo / totalExpense) : 6;
+  return (
+    <div className="max-w-2xl mx-auto">
+      <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--text)" }}>Reserva de emergência</h1>
+      <p className="text-sm mb-6" style={{ color: "var(--muted)" }}>
+        Uma reserva saudável cobre entre {mesesRecomendados > 3 ? "3 a 6" : "3"} meses das tuas despesas fixas.
+      </p>
+      <Card className="mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl flex items-center justify-center" style={{ background: T.greenSoft }}>
+              <Shield size={20} color={T.greenDark} />
+            </div>
+            <div>
+              <p className="font-semibold" style={{ color: "var(--text)" }}>{fmtKz(emergencyFund.valorGuardado)}</p>
+              <p className="text-xs" style={{ color: "var(--muted)" }}>de {fmtKz(emergencyFund.valorAlvo)}</p>
+            </div>
+          </div>
+          <Badge color={pct >= 100 ? T.green : T.blue}>{Math.round(pct)}%</Badge>
+        </div>
+        <ProgressBar pct={pct} color={pct >= 100 ? T.green : T.green} />
+        <p className="text-xs mt-3" style={{ color: "var(--muted)" }}>
+          No ritmo atual isto cobre <strong style={{ color: "var(--text)" }}>{mesesCobertura} meses</strong> de despesas caso percas a tua fonte de rendimento.
+        </p>
+        <button
+          onClick={() => setModal({ type: "addEmergency" })}
+          className="w-full py-2.5 rounded-xl text-sm font-semibold mt-4"
+          style={{ background: T.green, color: "#fff" }}
+        >
+          Reforçar reserva
+        </button>
+      </Card>
+      <Card style={{ background: T.blueSoft, borderColor: T.blueSoft }}>
+        <p className="text-xs font-semibold mb-1" style={{ color: T.blue }}>Porque ter uma reserva?</p>
+        <p className="text-sm" style={{ color: T.blue }}>
+          A reserva de emergência evita que precises de contrair novas dívidas em caso de imprevistos como perda de emprego, problemas de saúde ou reparações urgentes.
+        </p>
+      </Card>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   PLANEJADOR DE COMPRAS
+--------------------------------------------------------- */
+function PlanejadorCompras({ purchases, setModal, onToggleBought }) {
+  const pendentes = purchases.filter((p) => !p.comprado);
+  const compradas = purchases.filter((p) => p.comprado);
+  return (
+    <div className="max-w-4xl mx-auto">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>Planejador de compras</h1>
+          <p className="text-sm" style={{ color: "var(--muted)" }}>Planeia e reserva dinheiro antes de comprar.</p>
+        </div>
+        <button onClick={() => setModal("purchase")} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: T.blue }}>
+          <Plus size={16} /> Nova compra
+        </button>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-4 mb-6">
+        {pendentes.map((p) => {
+          const pct = (p.valorReservado / p.valorEstimado) * 100;
+          const prioColor = p.prioridade === "Alta" ? T.red : p.prioridade === "Média" ? T.amber : T.blue;
+          return (
+            <Card key={p.id}>
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <p className="font-semibold" style={{ color: "var(--text)" }}>{p.nome}</p>
+                  <p className="text-xs" style={{ color: "var(--muted)" }}>{p.categoria} · Prazo {new Date(p.prazo).toLocaleDateString("pt-PT")}</p>
+                </div>
+                <Badge color={prioColor}>{p.prioridade}</Badge>
+              </div>
+              <ProgressBar pct={pct} color={T.blue} />
+              <div className="flex justify-between text-xs mt-2 mb-3" style={{ color: "var(--muted)" }}>
+                <span>{fmtKz(p.valorReservado)}</span>
+                <span>{fmtKz(p.valorEstimado)}</span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setModal({ type: "addPurchase", purchaseId: p.id })}
+                  className="flex-1 py-2 rounded-xl text-xs font-semibold"
+                  style={{ background: T.blueSoft, color: T.blue }}
+                >
+                  Reservar dinheiro
+                </button>
+                {pct >= 100 && (
+                  <button
+                    onClick={() => onToggleBought(p.id)}
+                    className="flex-1 py-2 rounded-xl text-xs font-semibold"
+                    style={{ background: T.greenSoft, color: T.greenDark }}
+                  >
+                    Marcar como comprado
+                  </button>
+                )}
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+      {compradas.length > 0 && (
+        <>
+          <p className="text-sm font-semibold mb-3" style={{ color: "var(--text)" }}>Já compradas</p>
+          <Card>
+            <div className="flex flex-col divide-y" style={{ borderColor: "var(--border)" }}>
+              {compradas.map((p) => (
+                <div key={p.id} className="flex items-center justify-between py-2.5">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={16} color={T.green} />
+                    <span className="text-sm" style={{ color: "var(--text)" }}>{p.nome}</span>
+                  </div>
+                  <button onClick={() => onToggleBought(p.id)} className="text-xs" style={{ color: "var(--muted)" }}>Desfazer</button>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   CALENDÁRIO FINANCEIRO
+--------------------------------------------------------- */
+function CalendarioFinanceiro({ debts, purchases, bills }) {
+  const today = new Date("2026-08-07");
+  const events = useMemo(() => {
+    const list = [];
+    debts.filter((d) => d.status !== "Quitada").forEach((d) =>
+      list.push({ nome: d.nome, data: d.vencimento, tipo: "Dívida", valor: d.valorTotal - d.valorPago, color: T.red })
+    );
+    purchases.filter((p) => !p.comprado).forEach((p) =>
+      list.push({ nome: p.nome, data: p.prazo, tipo: "Compra planeada", valor: p.valorEstimado - p.valorReservado, color: T.blue })
+    );
+    bills.forEach((b) => {
+      const mes = today.getDate() <= b.dia ? today.getMonth() : today.getMonth() + 1;
+      const data = new Date(today.getFullYear(), mes, b.dia).toISOString().slice(0, 10);
+      list.push({ nome: b.nome, data, tipo: "Conta fixa", valor: b.valor, color: T.amber });
+    });
+    return list.sort((a, b) => new Date(a.data) - new Date(b.data));
+  }, [debts, purchases, bills]);
+
+  const daysWithEvents = new Set(events.map((e) => new Date(e.data).getDate()));
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const firstWeekday = new Date(today.getFullYear(), today.getMonth(), 1).getDay();
+
+  return (
+    <div className="max-w-3xl mx-auto">
+      <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--text)" }}>Calendário financeiro</h1>
+      <p className="text-sm mb-6" style={{ color: "var(--muted)" }}>Contas, dívidas e compras planeadas a vencer.</p>
+
+      <Card className="mb-4">
+        <p className="text-sm font-semibold mb-3 capitalize" style={{ color: "var(--text)" }}>
+          {today.toLocaleDateString("pt-PT", { month: "long", year: "numeric" })}
+        </p>
+        <div className="grid grid-cols-7 gap-1 text-center text-[11px] mb-1" style={{ color: "var(--muted)" }}>
+          {["D","S","T","Q","Q","S","S"].map((d, i) => <span key={i}>{d}</span>)}
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {Array.from({ length: firstWeekday }).map((_, i) => <span key={"e" + i} />)}
+          {Array.from({ length: daysInMonth }).map((_, i) => {
+            const day = i + 1;
+            const hasEvent = daysWithEvents.has(day);
+            const isToday = day === today.getDate();
+            return (
+              <div key={day} className="aspect-square flex flex-col items-center justify-center rounded-lg text-xs relative"
+                style={{ background: isToday ? T.greenSoft : "transparent", color: isToday ? T.greenDark : "var(--text)", fontWeight: isToday ? 700 : 400 }}>
+                {day}
+                {hasEvent && <span className="w-1.5 h-1.5 rounded-full absolute bottom-0.5" style={{ background: T.amber }} />}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      <p className="text-sm font-semibold mb-3" style={{ color: "var(--text)" }}>Próximas contas a vencer</p>
+      <Card>
+        <div className="flex flex-col divide-y" style={{ borderColor: "var(--border)" }}>
+          {events.map((e, idx) => (
+            <div key={idx} className="flex items-center justify-between py-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: e.color + "22", color: e.color }}>
+                  {new Date(e.data).getDate()}
+                </div>
+                <div>
+                  <p className="text-sm font-medium" style={{ color: "var(--text)" }}>{e.nome}</p>
+                  <p className="text-xs" style={{ color: "var(--muted)" }}>{e.tipo} · {new Date(e.data).toLocaleDateString("pt-PT")}</p>
+                </div>
+              </div>
+              <span className="text-sm font-semibold" style={{ color: e.color }}>{fmtKz(e.valor)}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   SIMULADOR DE EMPRÉSTIMO
+--------------------------------------------------------- */
+function SimuladorEmprestimo() {
+  const [valor, setValor] = useState("300000");
+  const [taxa, setTaxa] = useState("3");
+  const [parcelas, setParcelas] = useState("12");
+
+  const result = useMemo(() => {
+    const pv = Number(valor) || 0;
+    const i = (Number(taxa) || 0) / 100;
+    const n = Number(parcelas) || 1;
+    if (pv <= 0 || n <= 0) return null;
+    const parcela = i === 0 ? pv / n : (pv * i) / (1 - Math.pow(1 + i, -n));
+    const totalPago = parcela * n;
+    const totalJuros = totalPago - pv;
+    return { parcela, totalPago, totalJuros };
+  }, [valor, taxa, parcelas]);
+
+  return (
+    <div className="max-w-xl mx-auto">
+      <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--text)" }}>Simulador de empréstimo</h1>
+      <p className="text-sm mb-6" style={{ color: "var(--muted)" }}>Simula o valor da parcela antes de contrair uma dívida.</p>
+      <Card className="mb-4">
+        <div className="flex flex-col gap-4">
+          <div>
+            <FieldLabel>Valor do empréstimo (Kz)</FieldLabel>
+            <input type="number" value={valor} onChange={(e) => setValor(e.target.value)} style={inputStyle} />
+          </div>
+          <div>
+            <FieldLabel>Taxa de juros mensal (%)</FieldLabel>
+            <input type="number" value={taxa} onChange={(e) => setTaxa(e.target.value)} style={inputStyle} />
+          </div>
+          <div>
+            <FieldLabel>Número de parcelas</FieldLabel>
+            <input type="number" value={parcelas} onChange={(e) => setParcelas(e.target.value)} style={inputStyle} />
+          </div>
+        </div>
+      </Card>
+      {result && (
+        <div className="grid grid-cols-3 gap-3">
+          <Card><p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Parcela mensal</p><p className="text-base font-bold" style={{ color: T.blue }}>{fmtKz(result.parcela)}</p></Card>
+          <Card><p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Total a pagar</p><p className="text-base font-bold" style={{ color: "var(--text)" }}>{fmtKz(result.totalPago)}</p></Card>
+          <Card><p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Total em juros</p><p className="text-base font-bold" style={{ color: T.red }}>{fmtKz(result.totalJuros)}</p></Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   SAÚDE FINANCEIRA
+--------------------------------------------------------- */
+function SaudeFinanceira({ healthScore, totalIncome, totalExpense, totalDebtRemaining, emergencyFund }) {
+  const { total, savingsRate, debtRatio, coverage, avgGoalProgress } = healthScore;
+  const nivel = total >= 80 ? "Excelente" : total >= 60 ? "Boa" : total >= 40 ? "Razoável" : "Precisa de atenção";
+  const corNivel = total >= 80 ? T.green : total >= 60 ? T.blue : total >= 40 ? T.amber : T.red;
+
+  const fatores = [
+    { label: "Taxa de poupança", valor: `${Math.round(savingsRate * 100)}%`, pct: clamp01(savingsRate / 0.2) * 100, dica: "Guarda pelo menos 20% do que recebes." },
+    { label: "Peso das dívidas na renda", valor: `${Math.round(debtRatio * 100)}%`, pct: clamp01(1 - debtRatio) * 100, dica: "Mantém as dívidas restantes abaixo da tua renda mensal." },
+    { label: "Cobertura da reserva", valor: `${Math.round(coverage * 100)}%`, pct: clamp01(coverage) * 100, dica: "A meta é cobrir 6 meses de despesas." },
+    { label: "Progresso das metas", valor: `${Math.round(avgGoalProgress * 100)}%`, pct: clamp01(avgGoalProgress) * 100, dica: "Reforça as tuas metas regularmente." },
+  ];
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--text)" }}>Saúde financeira</h1>
+      <p className="text-sm mb-6" style={{ color: "var(--muted)" }}>Uma pontuação de 0 a 100 com base nos teus hábitos financeiros.</p>
+
+      <Card className="mb-4 flex flex-col items-center py-8" style={{ display: "flex" }}>
+        <div className="relative w-36 h-36 mb-3">
+          <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
+            <circle cx="60" cy="60" r="52" fill="none" stroke="var(--track)" strokeWidth="12" />
+            <circle
+              cx="60" cy="60" r="52" fill="none" stroke={corNivel} strokeWidth="12" strokeLinecap="round"
+              strokeDasharray={2 * Math.PI * 52}
+              strokeDashoffset={2 * Math.PI * 52 * (1 - total / 100)}
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-3xl font-bold" style={{ color: "var(--text)" }}>{total}</span>
+            <span className="text-xs" style={{ color: "var(--muted)" }}>de 100</span>
+          </div>
+        </div>
+        <Badge color={corNivel}>{nivel}</Badge>
+      </Card>
+
+      <div className="flex flex-col gap-3">
+        {fatores.map((f) => (
+          <Card key={f.label}>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium" style={{ color: "var(--text)" }}>{f.label}</p>
+              <span className="text-sm font-semibold" style={{ color: "var(--text)" }}>{f.valor}</span>
+            </div>
+            <ProgressBar pct={f.pct} color={T.blue} />
+            <p className="text-xs mt-2" style={{ color: "var(--muted)" }}>{f.dica}</p>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   CONQUISTAS E DESAFIOS
+--------------------------------------------------------- */
+function Conquistas({ achievements, state, challenges, onBump }) {
+  return (
+    <div className="max-w-3xl mx-auto">
+      <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--text)" }}>Conquistas e desafios</h1>
+      <p className="text-sm mb-6" style={{ color: "var(--muted)" }}>Mantém-te motivado enquanto organizas as tuas finanças.</p>
+
+      <p className="text-sm font-semibold mb-3" style={{ color: "var(--text)" }}>Conquistas</p>
+      <div className="grid sm:grid-cols-2 gap-3 mb-8">
+        {achievements.map((a) => {
+          const unlocked = a.check(state);
+          return (
+            <Card key={a.id} className="flex items-center gap-3" style={{ display: "flex", opacity: unlocked ? 1 : 0.6 }}>
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ background: unlocked ? T.amberSoft : "var(--track)" }}>
+                {unlocked ? <Trophy size={20} color={T.amber} /> : <Lock size={18} color="var(--muted)" />}
+              </div>
+              <div>
+                <p className="text-sm font-medium" style={{ color: "var(--text)" }}>{a.nome}</p>
+                <p className="text-xs" style={{ color: "var(--muted)" }}>{a.desc}</p>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+
+      <p className="text-sm font-semibold mb-3" style={{ color: "var(--text)" }}>Desafios em curso</p>
+      <div className="flex flex-col gap-3">
+        {challenges.map((c) => {
+          const pct = (c.progresso / c.meta) * 100;
+          const done = pct >= 100;
+          return (
+            <Card key={c.id}>
+              <div className="flex items-start justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Flame size={16} color={T.amber} />
+                  <p className="text-sm font-medium" style={{ color: "var(--text)" }}>{c.nome}</p>
+                </div>
+                {done ? <Badge color={T.green}>Concluído</Badge> : <Badge color={T.amber}>{c.progresso}/{c.meta} {c.unidade}</Badge>}
+              </div>
+              <p className="text-xs mb-2" style={{ color: "var(--muted)" }}>{c.desc}</p>
+              <ProgressBar pct={pct} color={done ? T.green : T.amber} />
+              {!done && (
+                <button
+                  onClick={() => onBump(c.id)}
+                  className="mt-3 px-3 py-1.5 rounded-lg text-xs font-semibold"
+                  style={{ background: T.amberSoft, color: "#92400E" }}
+                >
+                  Registar progresso de hoje
+                </button>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   MENU "MAIS" (mobile)
+--------------------------------------------------------- */
+function MaisMenu({ setScreen }) {
+  return (
+    <div className="max-w-lg mx-auto">
+      <h1 className="text-2xl font-bold mb-6" style={{ color: "var(--text)" }}>Mais</h1>
+      {NAV_SECTIONS.map((section) => (
+        <div key={section.title} className="mb-6">
+          <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--muted)" }}>{section.title}</p>
+          <div className="grid grid-cols-3 gap-3">
+            {section.items.map((n) => (
+              <button
+                key={n.key}
+                onClick={() => setScreen(n.key)}
+                className="flex flex-col items-center gap-2 py-4 rounded-2xl text-center"
+                style={{ background: "var(--card)", border: "1px solid var(--border)" }}
+              >
+                <n.icon size={20} color={T.green} />
+                <span className="text-xs font-medium" style={{ color: "var(--text)" }}>{n.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   DICAS
+--------------------------------------------------------- */
+function Dicas() {
+  return (
+    <div className="max-w-2xl mx-auto">
+      <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--text)" }}>Como sair das dívidas</h1>
+      <p className="text-sm mb-6" style={{ color: "var(--muted)" }}>Pequenos hábitos que fazem grande diferença.</p>
+      <div className="flex flex-col gap-2.5">
+        {TIPS.map((tip, i) => (
+          <Card key={i} className="flex items-start gap-3" style={{ display: "flex" }}>
+            <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold" style={{ background: T.greenSoft, color: T.greenDark }}>
+              {i + 1}
+            </div>
+            <p className="text-sm" style={{ color: "var(--text)" }}>{tip}</p>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   RELATÓRIOS
+--------------------------------------------------------- */
+function Relatorios({ expensesByCategory, monthlyEvolution, totalIncome, totalExpense }) {
+  const savingsRate = totalIncome > 0 ? Math.round(((totalIncome - totalExpense) / totalIncome) * 100) : 0;
+  return (
+    <div className="max-w-5xl mx-auto">
+      <h1 className="text-2xl font-bold mb-6" style={{ color: "var(--text)" }}>Relatórios</h1>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <Card><p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Receitas do mês</p><p className="text-lg font-bold" style={{ color: T.green }}>{fmtKz(totalIncome)}</p></Card>
+        <Card><p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Despesas do mês</p><p className="text-lg font-bold" style={{ color: T.red }}>{fmtKz(totalExpense)}</p></Card>
+        <Card><p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Taxa de poupança</p><p className="text-lg font-bold" style={{ color: T.blue }}>{savingsRate}%</p></Card>
+        <Card><p className="text-xs mb-1" style={{ color: "var(--muted)" }}>Categorias</p><p className="text-lg font-bold" style={{ color: "var(--text)" }}>{expensesByCategory.length}</p></Card>
+      </div>
+
+      <Card className="mb-4">
+        <p className="font-semibold text-sm mb-4" style={{ color: "var(--text)" }}>Receitas vs Despesas — evolução mensal</p>
+        <div style={{ height: 260 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={monthlyEvolution}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="mes" tick={{ fontSize: 12, fill: "var(--muted)" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: "var(--muted)" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v/1000}k`} />
+              <Tooltip formatter={(v) => fmtKz(v)} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Line type="monotone" dataKey="receitas" name="Receitas" stroke={T.green} strokeWidth={2.5} dot={false} />
+              <Line type="monotone" dataKey="despesas" name="Despesas" stroke={T.red} strokeWidth={2.5} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
+
+      <Card>
+        <p className="font-semibold text-sm mb-4" style={{ color: "var(--text)" }}>Despesas por categoria</p>
+        <div style={{ height: 240 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={expensesByCategory} layout="vertical" margin={{ left: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 11, fill: "var(--muted)" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v/1000}k`} />
+              <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 12, fill: "var(--muted)" }} axisLine={false} tickLine={false} />
+              <Tooltip formatter={(v) => fmtKz(v)} />
+              <Bar dataKey="value" radius={[0, 6, 6, 0]}>
+                {expensesByCategory.map((c, i) => <Cell key={i} fill={c.color} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   PERFIL
+--------------------------------------------------------- */
+function Perfil({ dark, setDark, profile, setProfile, session }) {
+  const [nome, setNome] = useState(profile.nome || "");
+  const [salvo, setSalvo] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
+
+  const email = session.user.email;
+  const iniciais = nome.trim()
+    ? nome.trim().split(/\s+/).slice(0, 2).map((p) => p[0].toUpperCase()).join("")
+    : "?";
+
+  const houveAlteracoes = nome !== (profile.nome || "");
+
+  function handleGuardar() {
+    setProfile((p) => ({ ...p, nome, registado: true }));
+    setSalvo(true);
+    setTimeout(() => setSalvo(false), 2000);
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+  }
+
+  async function handleExcluir() {
+    if (!confirm("Tem a certeza que quer excluir a conta? Todos os dados guardados na nuvem serão apagados permanentemente.")) return;
+    setExcluindo(true);
+    await supabase.from("user_data").delete().eq("user_id", session.user.id);
+    clearSavedState(session.user.id);
+    await supabase.auth.signOut();
+  }
+
+  return (
+    <div className="max-w-lg mx-auto">
+      <h1 className="text-2xl font-bold mb-6" style={{ color: "var(--text)" }}>Perfil</h1>
+      <Card className="mb-4">
+        <div className="flex items-center gap-4">
+          <div className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold" style={{ background: T.greenSoft, color: T.greenDark }}>
+            {iniciais}
+          </div>
+          <div className="flex-1 flex flex-col gap-2">
+            <input
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              placeholder="O seu nome"
+              className="w-full px-3 py-2 rounded-lg text-sm font-semibold outline-none"
+              style={{ background: "var(--bg)", color: "var(--text)", border: "1px solid var(--border)" }}
+            />
+            <div
+              className="w-full px-3 py-2 rounded-lg text-sm"
+              style={{ background: "var(--hover)", color: "var(--muted)", border: "1px solid var(--border)" }}
+              title="Email associado à conta (não editável aqui)"
+            >
+              {email}
+            </div>
+          </div>
+        </div>
+        <button
+          disabled={!nome.trim() || !houveAlteracoes}
+          onClick={handleGuardar}
+          className="w-full py-3 rounded-xl text-sm font-semibold text-white mt-4 disabled:opacity-50"
+          style={{ background: T.green }}
+        >
+          Guardar alterações
+        </button>
+        {salvo && (
+          <p className="text-xs font-medium mt-2 text-center" style={{ color: T.greenDark }}>
+            Perfil guardado e sincronizado ✓
+          </p>
+        )}
+      </Card>
+
+      <Card className="mb-4">
+        <Row label="Moeda" value="Kwanza (AOA)" />
+        <Row label="Idioma" value="Português" />
+        <Row label="Tema" custom={
+          <button onClick={() => setDark(!dark)} className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ background: T.greenSoft, color: T.greenDark }}>
+            {dark ? "Escuro" : "Claro"}
+          </button>
+        } />
+      </Card>
+      <div className="flex flex-col gap-2">
+        <button className="w-full py-3 rounded-xl text-sm font-semibold" style={{ background: T.blueSoft, color: T.blue }}>Exportar dados</button>
+        <button onClick={handleLogout} className="w-full py-3 rounded-xl text-sm font-semibold" style={{ background: "var(--hover)", color: "var(--text)" }}>Terminar sessão</button>
+        <button disabled={excluindo} onClick={handleExcluir} className="w-full py-3 rounded-xl text-sm font-semibold disabled:opacity-50" style={{ background: T.redSoft, color: T.red }}>
+          {excluindo ? "A excluir..." : "Excluir conta"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, value, custom }) {
+  return (
+    <div className="flex items-center justify-between py-2.5 border-b last:border-0" style={{ borderColor: "var(--border)" }}>
+      <span className="text-sm" style={{ color: "var(--muted)" }}>{label}</span>
+      {custom || <span className="text-sm font-medium" style={{ color: "var(--text)" }}>{value}</span>}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   FORMS
+--------------------------------------------------------- */
+function MovementForm({ title, categories, onSubmit, onClose }) {
+  const [valor, setValor] = useState("");
+  const [categoria, setCategoria] = useState(categories[0]);
+  const [descricao, setDescricao] = useState("");
+  const [data, setData] = useState("2026-08-07");
+
+  return (
+    <Modal title={title} onClose={onClose}>
+      <div className="flex flex-col gap-4">
+        <div>
+          <FieldLabel>Valor (Kz)</FieldLabel>
+          <input type="number" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0" style={inputStyle} />
+        </div>
+        <div>
+          <FieldLabel>Categoria</FieldLabel>
+          <select value={categoria} onChange={(e) => setCategoria(e.target.value)} style={inputStyle}>
+            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <FieldLabel>Descrição</FieldLabel>
+          <input value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Ex: Supermercado" style={inputStyle} />
+        </div>
+        <div>
+          <FieldLabel>Data</FieldLabel>
+          <input type="date" value={data} onChange={(e) => setData(e.target.value)} style={inputStyle} />
+        </div>
+        <button
+          disabled={!valor}
+          onClick={() => onSubmit({ valor: Number(valor), categoria, descricao: descricao || categoria, data })}
+          className="w-full py-3 rounded-xl text-sm font-semibold text-white mt-2 disabled:opacity-50"
+          style={{ background: T.green }}
+        >
+          Guardar
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function GoalForm({ onSubmit, onClose }) {
+  const [nome, setNome] = useState("");
+  const [valorDesejado, setValorDesejado] = useState("");
+  const [prazo, setPrazo] = useState("2026-12-31");
+
+  return (
+    <Modal title="Nova meta financeira" onClose={onClose}>
+      <div className="flex flex-col gap-4">
+        <div>
+          <FieldLabel>Nome da meta</FieldLabel>
+          <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex: Comprar carro" style={inputStyle} />
+        </div>
+        <div>
+          <FieldLabel>Valor desejado (Kz)</FieldLabel>
+          <input type="number" value={valorDesejado} onChange={(e) => setValorDesejado(e.target.value)} placeholder="0" style={inputStyle} />
+        </div>
+        <div>
+          <FieldLabel>Prazo</FieldLabel>
+          <input type="date" value={prazo} onChange={(e) => setPrazo(e.target.value)} style={inputStyle} />
+        </div>
+        <button
+          disabled={!nome || !valorDesejado}
+          onClick={() => onSubmit({ nome, valorDesejado: Number(valorDesejado), prazo })}
+          className="w-full py-3 rounded-xl text-sm font-semibold text-white mt-2 disabled:opacity-50"
+          style={{ background: T.blue }}
+        >
+          Criar meta
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function PurchaseForm({ onSubmit, onClose }) {
+  const [nome, setNome] = useState("");
+  const [categoria, setCategoria] = useState("Compras");
+  const [valorEstimado, setValorEstimado] = useState("");
+  const [prioridade, setPrioridade] = useState("Média");
+  const [prazo, setPrazo] = useState("2026-12-31");
+
+  return (
+    <Modal title="Nova compra planeada" onClose={onClose}>
+      <div className="flex flex-col gap-4">
+        <div>
+          <FieldLabel>Nome da compra</FieldLabel>
+          <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex: Telemóvel novo" style={inputStyle} />
+        </div>
+        <div>
+          <FieldLabel>Categoria</FieldLabel>
+          <select value={categoria} onChange={(e) => setCategoria(e.target.value)} style={inputStyle}>
+            {["Compras","Casa","Viagem","Educação","Saúde","Presentes","Outros"].map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <FieldLabel>Valor estimado (Kz)</FieldLabel>
+          <input type="number" value={valorEstimado} onChange={(e) => setValorEstimado(e.target.value)} placeholder="0" style={inputStyle} />
+        </div>
+        <div>
+          <FieldLabel>Prioridade</FieldLabel>
+          <select value={prioridade} onChange={(e) => setPrioridade(e.target.value)} style={inputStyle}>
+            <option>Baixa</option><option>Média</option><option>Alta</option>
+          </select>
+        </div>
+        <div>
+          <FieldLabel>Prazo desejado</FieldLabel>
+          <input type="date" value={prazo} onChange={(e) => setPrazo(e.target.value)} style={inputStyle} />
+        </div>
+        <button
+          disabled={!nome || !valorEstimado}
+          onClick={() => onSubmit({ nome, categoria, valorEstimado: Number(valorEstimado), prioridade, prazo })}
+          className="w-full py-3 rounded-xl text-sm font-semibold text-white mt-2 disabled:opacity-50"
+          style={{ background: T.blue }}
+        >
+          Adicionar à lista
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function DebtForm({ onSubmit, onClose }) {
+  const [nome, setNome] = useState("");
+  const [credor, setCredor] = useState("");
+  const [valorTotal, setValorTotal] = useState("");
+  const [vencimento, setVencimento] = useState("2026-09-01");
+  const [prioridade, setPrioridade] = useState("Média");
+  const [juros, setJuros] = useState("");
+
+  return (
+    <Modal title="Nova dívida" onClose={onClose}>
+      <div className="flex flex-col gap-4">
+        <div>
+          <FieldLabel>Nome da dívida</FieldLabel>
+          <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex: Cartão de crédito" style={inputStyle} />
+        </div>
+        <div>
+          <FieldLabel>Credor</FieldLabel>
+          <input value={credor} onChange={(e) => setCredor(e.target.value)} placeholder="Pessoa ou empresa" style={inputStyle} />
+        </div>
+        <div>
+          <FieldLabel>Valor total (Kz)</FieldLabel>
+          <input type="number" value={valorTotal} onChange={(e) => setValorTotal(e.target.value)} placeholder="0" style={inputStyle} />
+        </div>
+        <div>
+          <FieldLabel>Data de vencimento</FieldLabel>
+          <input type="date" value={vencimento} onChange={(e) => setVencimento(e.target.value)} style={inputStyle} />
+        </div>
+        <div>
+          <FieldLabel>Prioridade</FieldLabel>
+          <select value={prioridade} onChange={(e) => setPrioridade(e.target.value)} style={inputStyle}>
+            <option>Baixa</option><option>Média</option><option>Alta</option>
+          </select>
+        </div>
+        <div>
+          <FieldLabel>Taxa de juros % (opcional)</FieldLabel>
+          <input type="number" value={juros} onChange={(e) => setJuros(e.target.value)} placeholder="0" style={inputStyle} />
+        </div>
+        <button
+          disabled={!nome || !valorTotal}
+          onClick={() => onSubmit({ nome, credor, valorTotal: Number(valorTotal), vencimento, prioridade, juros: Number(juros) || 0 })}
+          className="w-full py-3 rounded-xl text-sm font-semibold text-white mt-2 disabled:opacity-50"
+          style={{ background: T.amber }}
+        >
+          Adicionar dívida
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function AmountForm({ title, cta, onSubmit, onClose }) {
+  const [valor, setValor] = useState("");
+  return (
+    <Modal title={title} onClose={onClose}>
+      <div className="flex flex-col gap-4">
+        <div>
+          <FieldLabel>Valor (Kz)</FieldLabel>
+          <input type="number" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0" style={inputStyle} autoFocus />
+        </div>
+        <button
+          disabled={!valor}
+          onClick={() => onSubmit(Number(valor))}
+          className="w-full py-3 rounded-xl text-sm font-semibold text-white mt-2 disabled:opacity-50"
+          style={{ background: T.green }}
+        >
+          {cta}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
